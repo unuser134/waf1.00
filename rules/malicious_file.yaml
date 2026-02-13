@@ -1,0 +1,38 @@
+# 恶意文件上传规则
+rules:
+  - name: "EXE_UPLOAD"
+    category: "malicious_file"
+    severity: "critical"
+    enabled: true
+    priority: 12
+    confidence: 0.99
+    patterns:
+      - '(?i)\.exe'
+      - '(?i)\.bat'
+      - '(?i)\.cmd'
+      - '(?i)\.scr'
+  
+  - name: "SHELL_UPLOAD"
+    category: "malicious_file"
+    severity: "critical"
+    enabled: true
+    priority: 13
+    confidence: 0.98
+    patterns:
+      - '(?i)\.php'
+      - '(?i)\.jsp'
+      - '(?i)\.asp'
+      - '(?i)\.shell'
+  
+  - name: "ARCHIVE_UPLOAD"
+    category: "malicious_file"
+    severity: "medium"
+    enabled: true
+    priority: 14
+    confidence: 0.85
+    enabled: true
+    patterns:
+      - '(?i)\.zip'
+      - '(?i)\.tar'
+      - '(?i)\.gz'
+      - '(?i)\.rar'

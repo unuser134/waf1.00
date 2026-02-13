@@ -1,49 +1,44 @@
-﻿# WAF系统配置文件
-# 版本: 1.0.0
-
-system:
-  name: "DL-WAF Hybrid"
+﻿# 传统WAF配置文件
+waf:
+  name: "TraditionalWAF"
   version: "1.0.0"
-  debug: true
-  log_level: "INFO"
-
+  mode: "protection"  # protection, detection
+  
 server:
   host: "0.0.0.0"
   port: 8080
-  workers: 4
+  workers: 1
   timeout: 30
   max_request_size: "10MB"
-
+  
 detection:
-  mode: "hybrid"  # hybrid, rule_only, model_only
-  rule_threshold: 1
-  model_threshold: 0.8
-  cache_enabled: true
-  cache_size: 10000
-
-model:
-  path: "models/saved/final_model.pth"
-  device: "auto"  # auto, cpu, cuda
-  batch_size: 32
-  max_sequence_length: 2000
-
-rules:
   enabled: true
-  update_check: true
-  check_interval: 3600  # 每小时检查更新
+  rule_matching: true
+  signature_matching: true
+  anomaly_detection: false
+  
+rules:
+  auto_reload: false
+  reload_interval: 300
   directories:
-    - "rules/sql"
-    - "rules/xss"
-    - "rules/other"
-
+    - "rules/sql_injection.yaml"
+    - "rules/xss.yaml"
+    - "rules/directory_traversal.yaml"
+    - "rules/malicious_file.yaml"
+  
 logging:
-  access_log: "logs/access/access.log"
-  error_log: "logs/error/error.log"
-  debug_log: "logs/debug/debug.log"
+  level: "INFO"
+  access_log: "logs/access.log"
+  error_log: "logs/error.log"
+  blocked_log: "logs/blocked.log"
   max_size: "100MB"
   backup_count: 5
-
-database:
-  enabled: false
-  type: "sqlite"
-  path: "data/processed/waf.db"
+  
+whitelist:
+  enabled: true
+  file: "config/whitelist.yaml"
+  
+blocking:
+  enabled: true
+  response_code: 403
+  response_message: "Request blocked by WAF"

@@ -38,8 +38,10 @@ logs/
 
 # 环境
 venv/
+.venv/
 env/
 ENV/
+.env
 
 # 日志
 *.log

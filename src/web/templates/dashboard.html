@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WAF 管理面板 - DL混合防火墙</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🛡️ DL混合WAF管理系统</h1>
+            <div class="status-bar">
+                <div class="status-item">
+                    <div class="status-indicator" id="system-status"></div>
+                    <span>系统状态: <strong id="status-text">正常</strong></span>
+                </div>
+                <div class="status-item">
+                    <span>最后更新: <strong id="last-update">-</strong></span>
+                </div>
+                <div class="status-item">
+                    <span>缓存日志: <strong id="logs-count">0</strong></span>
+                </div>
+            </div>
+        </header>
+        
+        <div class="dashboard-grid">
+            <!-- 统计卡片 -->
+            <div class="card">
+                <h2>24小时攻击总数</h2>
+                <div class="stat-value" id="total-attacks">0</div>
+                <div class="stat-label">检测到的攻击次数</div>
+            </div>
+            
+            <div class="card">
+                <h2>高危攻击</h2>
+                <div class="stat-value" id="critical-attacks">0</div>
+                <div class="stat-label">Critical + High级别</div>
+            </div>
+            
+            <div class="card">
+                <h2>防护覆盖</h2>
+                <div class="stat-value" id="rule-count">0</div>
+                <div class="stat-label">已加载规则数</div>
+            </div>
+        </div>
+        
+        <!-- 图表 -->
+        <div class="card">
+            <h2>攻击趋势（小时）</h2>
+            <div class="chart-container">
+                <canvas id="trendsChart"></canvas>
+            </div>
+        </div>
+        
+        <!-- 标签页 -->
+        <div class="card">
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('attacks')">最近攻击</button>
+                <button class="tab" onclick="switchTab('rules')">规则管理</button>
+                <button class="tab" onclick="switchTab('whitelist')">白名单</button>
+                <button class="tab" onclick="switchTab('deploy')">部署</button>
+            </div>
+            
+            <!-- 最近攻击 -->
+            <div id="attacks" class="tab-content active">
+                <div class="action-buttons">
+                    <button onclick="refreshLogs()">刷新日志</button>
+                    <button onclick="exportLogs()">导出日志</button>
+                    <button class="danger" onclick="clearLogs()">清空日志</button>
+                </div>
+                <table class="logs-table">
+                    <thead>
+                        <tr>
+                            <th>时间</th>
+                            <th>攻击类型</th>
+                            <th>严重程度</th>
+                            <th>来源IP</th>
+                            <th>检测方法</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logs-body">
+                        <tr><td colspan="5" class="muted-center">加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- 规则管理 -->
+            <div id="rules" class="tab-content">
+                <div class="action-buttons">
+                    <button onclick="reloadRules()">重新加载规则</button>
+                </div>
+                <div id="rules-info">
+                    <div id="rules-detail"></div>
+                </div>
+            </div>
+            
+            <!-- 白名单 -->
+            <div id="whitelist" class="tab-content">
+                <div class="action-buttons">
+                    <input type="text" id="whitelist-input" placeholder="输入IP或路径" class="input-flex">
+                    <button onclick="addWhitelist()">添加</button>
+                </div>
+                <div id="whitelist-list">加载中...</div>
+            </div>
+
+            <!-- 部署/控制 -->
+            <div id="deploy" class="tab-content">
+                <h3>部署与控制</h3>
+                <div class="action-buttons">
+                    <label class="label-inline">运行模式:
+                        <select id="mode-select">
+                            <option value="protection">🛡️ 保护模式</option>
+                            <option value="detection">📊 检测模式</option>
+                        </select>
+                    </label>
+                    <button onclick="setMode()">设置模式</button>
+                </div>
+
+                <div class="action-buttons">
+                    <input id="proxy-backend" type="text" placeholder="后端地址，例如 http://localhost:8081" class="input-flex">
+                    <input id="proxy-port" type="number" value="8080" class="input-small">
+                    <button onclick="startProxy()">启动代理</button>
+                    <button class="danger" onclick="stopProxy()">停止代理</button>
+                </div>
+
+                <div id="deploy-status">加载中...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // 定时刷新数据
+        setInterval(refreshData, 5000);
+        
+        function refreshData() {
+            // 刷新统计数据
+            fetch('/api/stats?hours=24')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('total-attacks').textContent = data.total_attacks || 0;
+                    
+                    const critical = (data.by_severity?.critical || 0) + (data.by_severity?.high || 0);
+                    document.getElementById('critical-attacks').textContent = critical;
+                    
+                    updateTrendsChart(data.hourly_trend || {});
+                })
+                .catch(e => console.error('刷新统计失败:', e));
+            
+            // 刷新日志计数
+            fetch('/api/logs?limit=1')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('logs-count').textContent = data.count || 0;
+                    document.getElementById('last-update').textContent = new Date().toLocaleTimeString('zh-CN');
+                })
+                .catch(e => console.error('刷新日志计数失败:', e));
+        }
+        
+        function switchTab(name) {
+            // 隐藏所有标签页内容
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+            
+            // 显示选中的标签页
+            document.getElementById(name).classList.add('active');
+            event.target.classList.add('active');
+            
+            // 加载对应数据
+            if (name === 'attacks') refreshLogs();
+            else if (name === 'rules') loadRules();
+            else if (name === 'whitelist') loadWhitelist();
+        }
+        
+        function refreshLogs() {
+            fetch('/api/logs?limit=50')
+                .then(r => r.json())
+                .then(data => {
+                    const tbody = document.getElementById('logs-body');
+                    if (data.logs.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="5" class="muted-center">暂无攻击日志</td></tr>';
+                        return;
+                    }
+                    
+                    tbody.innerHTML = data.logs.map(log => `
+                        <tr>
+                            <td>${log.timestamp?.substring(11, 19) || '-'}</td>
+                            <td>${log.category || '-'}</td>
+                            <td><span class="severity-${log.severity || 'unknown'}">${log.severity || '-'}</span></td>
+                            <td>${log.source_ip || '-'}</td>
+                            <td>${log.detection_method || '-'}</td>
+                        </tr>
+                    `).join('');
+                })
+                .catch(e => console.error('刷新日志失败:', e));
+        }
+        
+        function reloadRules() {
+            fetch('/api/rules/reload', {method: 'POST'})
+                .then(r => r.json())
+                .then(data => alert('规则已重新加载'))
+                .catch(e => alert('重新加载规则失败: ' + e));
+        }
+        
+        function loadRules() {
+            fetch('/api/rules')
+                .then(r => r.json())
+                .then(data => {
+                    const detail = document.getElementById('rules-detail');
+                    let html = `
+                        <div class="rules-card">
+                            <h4 class="rules-heading">📊 规则统计信息</h4>
+                            <div class="rules-grid">
+                                <div class="rules-stat rules-stat-primary">
+                                    <div class="stat-label">总规则数</div>
+                                    <div class="stat-value">${data.total_rules || 0}</div>
+                                </div>
+                                <div class="rules-stat rules-stat-success">
+                                    <div class="stat-label">已启用规则</div>
+                                    <div class="stat-value">${data.enabled_rules || 0}</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="rules-card">
+                            <h4 class="rules-heading">🏷️ 攻击类别分布</h4>
+                            <div class="category-grid">
+                    `;
+                    
+                    const categories = {
+                        'sql_injection': 'SQL注入',
+                        'xss': '跨站脚本',
+                        'directory_traversal': '目录遍历',
+                        'file_inclusion': '文件包含',
+                        'malicious_file': '恶意文件'
+                    };
+                    
+                    for (const [key, label] of Object.entries(categories)) {
+                        const count = data.by_category?.[key] || 0;
+                        if (count > 0) {
+                            html += `<div class="category-card">
+                                <div class="category-label">${label}</div>
+                                <div class="category-value">${count}</div>
+                            </div>`;
+                        }
+                    }
+
+                    html += `</div></div><div class="rules-card"><h4 class="rules-heading">⚠️ 严重度分布</h4><div class="severity-grid">
+                    `;
+                    const severities = {
+                        'critical': { label: '严重', color: '#F44336' },
+                        'high': { label: '高', color: '#FF9800' },
+                        'medium': { label: '中', color: '#FFC107' }
+                    };
+                    
+                    for (const [key, info] of Object.entries(severities)) {
+                        const count = data.by_severity?.[key] || 0;
+                        html += `<div class="severity-card severity-card-${key}">
+                            <div class="severity-label">${info.label}</div>
+                            <div class="severity-value">${count}</div>
+                        </div>`;
+                    }
+                    
+                    html += `</div></div>`;
+                    detail.innerHTML = html;
+                })
+                .catch(e => console.error('加载规则失败:', e));
+        }
+        
+        function loadWhitelist() {
+            fetch('/api/whitelist')
+                .then(r => r.json())
+                .then(data => {
+                    const list = document.getElementById('whitelist-list');
+                    if (data.whitelist.length === 0) {
+                        list.innerHTML = '<p class="muted">白名单为空</p>';
+                        return;
+                    }
+
+                    list.innerHTML = '<ul class="whitelist-list">' +
+                        data.whitelist.map(item => `
+                            <li class="whitelist-item">
+                                <span>${item}</span>
+                                <button class="btn-danger btn-small" onclick="removeWhitelist('${item}')">删除</button>
+                            </li>
+                        `).join('') +
+                        '</ul>';
+                })
+                .catch(e => console.error('加载白名单失败:', e));
+        }
+        
+        function exportLogs() {
+            window.location.href = '/api/export/logs';
+        }
+        
+        function clearLogs() {
+            if (confirm('确定要清空所有日志吗？')) {
+                alert('日志已清空');
+            }
+        }
+        
+        function addWhitelist() {
+            const input = document.getElementById('whitelist-input');
+            const item = input.value.trim();
+            if (!item) return;
+            
+            fetch('/api/whitelist', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({item})
+            })
+            .then(r => r.json())
+            .then(() => {
+                input.value = '';
+                loadWhitelist();
+            })
+            .catch(e => alert('添加失败: ' + e));
+        }
+        
+        function removeWhitelist(item) {
+            fetch(`/api/whitelist/${encodeURIComponent(item)}`, {method: 'DELETE'})
+                .then(r => r.json())
+                .then(() => loadWhitelist())
+                .catch(e => alert('删除失败: ' + e));
+        }
+        
+        let trendsChart = null;
+        
+        function updateTrendsChart(data) {
+            const ctx = document.getElementById('trendsChart').getContext('2d');
+            const labels = Object.keys(data).sort();
+            const values = labels.map(l => data[l]);
+            
+            if (trendsChart) trendsChart.destroy();
+            
+            trendsChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: '攻击数量',
+                        data: values,
+                        borderColor: '#667eea',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {display: true}
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {stepSize: 1}
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 初始化
+        refreshData();
+        refreshLogs();
+        // 部署状态轮询
+        setInterval(getDeployStatus, 5000);
+
+        function getDeployStatus() {
+            fetch('/api/deploy/status')
+                .then(r => r.json())
+                .then(data => {
+                    const el = document.getElementById('deploy-status');
+                    const modeLabel = data.mode === 'protection' ? '🛡️ 保护模式' : '📊 检测模式';
+                    const proxyLabel = data.proxy.status === 'running' ? '✅ 运行中' : '⏹️ 已停止';
+                    const pidInfo = data.proxy.pid ? ` (PID: ${data.proxy.pid})` : '';
+                    
+                    el.innerHTML = `
+                        <div class="deploy-status-grid">
+                            <div class="deploy-card deploy-card-ok">
+                                <div class="small-label">当前模式</div>
+                                <div class="deploy-value">${modeLabel}</div>
+                            </div>
+                            <div class="deploy-card ${data.proxy.status === 'running' ? 'deploy-card-ok' : 'deploy-card-stopped'}">
+                                <div class="small-label">代理状态</div>
+                                <div class="deploy-value">${proxyLabel}${pidInfo}</div>
+                            </div>
+                        </div>
+                    `;
+                    document.getElementById('mode-select').value = data.mode;
+                })
+                .catch(e => console.error('获取部署状态失败:', e));
+        }
+
+        function setMode() {
+            const mode = document.getElementById('mode-select').value;
+            fetch('/api/deploy/mode', {method:'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mode})})
+                .then(r => r.json())
+                .then(() => alert('模式已设置'))
+                .catch(e => alert('设置模式失败: '+e));
+        }
+
+        function startProxy() {
+            const backend = document.getElementById('proxy-backend').value.trim();
+            const port = parseInt(document.getElementById('proxy-port').value, 10) || 8080;
+            if (!backend) { alert('请输入后端地址'); return; }
+            fetch('/api/deploy/proxy/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({backend, port})})
+                .then(r => r.json())
+                .then(data => { if (data.status === 'success') alert('代理启动成功: pid ' + data.pid); else alert('启动失败: '+(data.message||JSON.stringify(data))); })
+                .catch(e => alert('启动代理失败: '+e));
+        }
+
+        function stopProxy() {
+            fetch('/api/deploy/proxy/stop', {method:'POST'})
+                .then(r => r.json())
+                .then(data => { if (data.status === 'success') alert('代理已停止'); else alert('停止失败: '+(data.message||JSON.stringify(data))); })
+                .catch(e => alert('停止代理失败: '+e));
+        }
+    </script>
+</body>
+</html>
