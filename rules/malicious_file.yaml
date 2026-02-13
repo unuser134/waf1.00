@@ -1,4 +1,7 @@
 # 恶意文件上传规则
+metadata:
+  version: "1.0.0"
+  release_date: "2026-02-13"
 rules:
   - name: "EXE_UPLOAD"
     category: "malicious_file"
@@ -6,6 +9,7 @@ rules:
     enabled: true
     priority: 12
     confidence: 0.99
+    cost_level: "fast"
     patterns:
       - '(?i)\.exe'
       - '(?i)\.bat'
@@ -18,6 +22,7 @@ rules:
     enabled: true
     priority: 13
     confidence: 0.98
+    cost_level: "fast"
     patterns:
       - '(?i)\.php'
       - '(?i)\.jsp'
@@ -27,10 +32,10 @@ rules:
   - name: "ARCHIVE_UPLOAD"
     category: "malicious_file"
     severity: "medium"
-    enabled: true
     priority: 14
     confidence: 0.85
     enabled: true
+    cost_level: "fast"
     patterns:
       - '(?i)\.zip'
       - '(?i)\.tar'

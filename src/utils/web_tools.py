@@ -3,7 +3,7 @@ Web工具函数 - 请求解析、响应生成等
 """
 import re
 from typing import Dict, Any, Tuple, List
-from urllib.parse import urlparse, parse_qs, unquote
+from urllib.parse import urlparse, parse_qs, parse_qsl, unquote, urlencode
 import json
 
 
@@ -86,6 +86,37 @@ class HTTPRequestParser:
             return data
         
         return {}
+
+    @staticmethod
+    def normalize_request(request: Dict[str, Any]) -> Dict[str, Any]:
+        """对请求做统一规范化，减少规则重复覆盖。"""
+        url = request.get('url', '') or ''
+        method = (request.get('method', '') or 'GET').upper()
+        headers = request.get('headers', {}) or {}
+        body = request.get('body', '') or ''
+
+        # URL 解码 + 解析 + 参数排序（保持解码后的可读形态）
+        decoded_url = unquote(url)
+        parsed = urlparse(decoded_url)
+        query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
+        query_pairs.sort(key=lambda x: (x[0], x[1]))
+        normalized_query = '&'.join([f"{k}={v}" for k, v in query_pairs])
+        normalized_url = parsed.path
+        if normalized_query:
+            normalized_url = f"{normalized_url}?{normalized_query}"
+
+        # 统一大小写与空白
+        normalized_body = re.sub(r'\s+', ' ', unquote(body)).strip().lower()
+        normalized_headers = {str(k).lower(): str(v).strip() for k, v in headers.items()}
+
+        return {
+            'method': method,
+            'url': normalized_url.lower(),
+            'headers': normalized_headers,
+            'body': normalized_body,
+            'query_string': normalized_query.lower(),
+            'path': parsed.path.lower(),
+        }
 
 
 class URLDecoder:

@@ -32,22 +32,41 @@ def setup_directories():
     Path('models/saved').mkdir(parents=True, exist_ok=True)
 
 
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            'timestamp': datetime.fromtimestamp(record.created).isoformat(),
+            'level': record.levelname,
+            'logger': record.name,
+            'message': record.getMessage(),
+        }
+        return json.dumps(payload, ensure_ascii=False)
+
+
 def setup_logging(config):
     level = getattr(logging, config.logging.level, logging.INFO)
-    max_bytes = parse_size_bytes(config.logging.max_size)
     backup_count = config.logging.backup_count
 
     log_file = Path(config.logging.error_log)
     log_file.parent.mkdir(parents=True, exist_ok=True)
 
+    file_handler = logging.handlers.TimedRotatingFileHandler(
+        log_file,
+        when='D',
+        interval=1,
+        backupCount=backup_count,
+        encoding='utf-8'
+    )
+    file_handler.setFormatter(JsonFormatter())
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    ))
+
     handlers = [
-        logging.handlers.RotatingFileHandler(
-            log_file,
-            maxBytes=max_bytes,
-            backupCount=backup_count,
-            encoding='utf-8'
-        ),
-        logging.StreamHandler()
+        file_handler,
+        stream_handler
     ]
 
     logging.basicConfig(

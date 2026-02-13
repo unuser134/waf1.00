@@ -1,4 +1,7 @@
 # XSS攻击规则
+metadata:
+  version: "1.0.0"
+  release_date: "2026-02-13"
 rules:
   - name: "XSS_SCRIPT_TAG"
     category: "xss"
@@ -6,6 +9,7 @@ rules:
     enabled: true
     priority: 5
     confidence: 0.98
+    cost_level: "fast"
     patterns:
       - '(?i)<script[^>]*>'
       - '(?i)</script>'
@@ -16,6 +20,7 @@ rules:
     enabled: true
     priority: 6
     confidence: 0.96
+    cost_level: "accurate"
     patterns:
       - '(?i)on(load|error|click|focus|blur|change)\s*='
       - '(?i)javascript:'
@@ -26,6 +31,7 @@ rules:
     enabled: true
     priority: 7
     confidence: 0.90
+    cost_level: "accurate"
     patterns:
       - '(?i)<img[^>]*onerror\s*='
       - '(?i)<img[^>]*onload\s*='
@@ -36,6 +42,7 @@ rules:
     enabled: true
     priority: 8
     confidence: 0.88
+    cost_level: "accurate"
     patterns:
       - '(?i)%3cscript'
       - '(?i)&#60;script'

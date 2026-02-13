@@ -1,4 +1,7 @@
 # SQL注入攻击规则
+metadata:
+  version: "1.0.0"
+  release_date: "2026-02-13"
 rules:
   - name: "SQL_UNION_SELECT"
     category: "sql_injection"
@@ -6,6 +9,7 @@ rules:
     enabled: true
     priority: 1           # 高优先级：UNION SELECT是常见注入手法
     confidence: 0.99
+    cost_level: "accurate"
     patterns:
       - '(?i)(union.*select|select.*union)'
       - '(?i)union.*from'
@@ -16,6 +20,7 @@ rules:
     enabled: true
     priority: 2           # 高优先级：OR 1=1是经典注入
     confidence: 0.95
+    cost_level: "fast"
     patterns:
       - "(?i)('|\\\")\\s*or\\s*('|\\\")?\\d+('|\\\")?\\s*=\\s*('|\\\")?\\d+"
       - '(?i)or\s+1\s*=\s*1'
@@ -27,6 +32,7 @@ rules:
     enabled: true
     priority: 3           # 中优先级：危险但较少见
     confidence: 0.98
+    cost_level: "accurate"
     patterns:
       - '(?i)drop\s+table'
       - '(?i)delete\s+from'
@@ -38,6 +44,7 @@ rules:
     enabled: true
     priority: 4           # 中优先级：执行脚本威胁高
     confidence: 0.97
+    cost_level: "expensive"
     patterns:
       - '(?i)(exec|execute)\s*\('
       - '(?i)sp_executesql'

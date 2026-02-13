@@ -322,10 +322,21 @@ class WAFWebApp:
         @self.app.route('/api/health', methods=['GET'])
         def health_check():
             """健康检查"""
+            rule_stats = {}
+            if self.rule_engine:
+                try:
+                    rule_stats = self.rule_engine.get_stats()
+                except Exception:
+                    rule_stats = {}
             return jsonify({
                 'status': 'healthy',
                 'timestamp': datetime.now().isoformat(),
-                'logs_count': len(self.attack_log.logs)
+                'logs_count': len(self.attack_log.logs),
+                'rules_total': rule_stats.get('total_rules'),
+                'rules_enabled': rule_stats.get('enabled_rules'),
+                'rules_version': rule_stats.get('latest_rule_version'),
+                'rules_release_date': rule_stats.get('latest_rule_release_date'),
+                'rule_engine_load_ms': rule_stats.get('load_duration_ms')
             })
         
         @self.app.route('/api/export/logs', methods=['GET'])

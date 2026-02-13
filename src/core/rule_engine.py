@@ -4,10 +4,13 @@
 """
 import yaml
 import re
+import time
 from typing import List, Dict, Any, Tuple
 from pathlib import Path
 from dataclasses import dataclass
 import logging
+
+from src.utils.web_tools import HTTPRequestParser
 
 logger = logging.getLogger(__name__)
 
@@ -22,17 +25,23 @@ class Rule:
     enabled: bool = True
     priority: int = 999  # 优先级（1最高，999最低），用于排序检测顺序
     confidence: float = 1.0  # 置信度（0.0-1.0），未来可用于DL融合
+    cost_level: str = "accurate"  # fast, accurate, expensive
+
+    def __post_init__(self):
+        self.compiled_patterns = []
+        for pattern in self.patterns:
+            try:
+                self.compiled_patterns.append(re.compile(pattern, re.IGNORECASE))
+            except re.error as e:
+                logger.error(f"规则 {self.name} 正则表达式错误: {e}")
     
     def match(self, text: str) -> bool:
         """检查文本是否匹配规则"""
         if not self.enabled:
             return False
-        for pattern in self.patterns:
-            try:
-                if re.search(pattern, text, re.IGNORECASE):
-                    return True
-            except re.error as e:
-                logger.error(f"规则 {self.name} 正则表达式错误: {e}")
+        for pattern in self.compiled_patterns:
+            if pattern.search(text):
+                return True
         return False
 
     def to_dict(self) -> Dict[str, Any]:
@@ -42,7 +51,8 @@ class Rule:
             'category': self.category,
             'patterns': list(self.patterns),
             'severity': self.severity,
-            'enabled': self.enabled
+            'enabled': self.enabled,
+            'cost_level': self.cost_level
         }
 
     def __contains__(self, key: str) -> bool:
@@ -60,7 +70,12 @@ class RuleEngine:
         self.config_path = Path(config_path)
         self.rules: List[Rule] = []
         self.rule_files: List[str] = []
+        self.rule_metadata: List[Dict[str, Any]] = []
         self.severity_levels = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+        self.cost_rank = {"fast": 0, "accurate": 1, "expensive": 2}
+        self.cache_ttl_seconds = 5
+        self.match_cache: Dict[str, Tuple[float, Tuple[bool, List[Dict[str, Any]]]]] = {}
+        self.load_duration_ms = 0
         self.load_config()
         self.load_rules()
     
@@ -70,6 +85,7 @@ class RuleEngine:
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
                 self.rule_files = config.get('rules', {}).get('directories', [])
+                self.cache_ttl_seconds = int(config.get('detection', {}).get('cache_ttl_seconds', 5))
                 logger.info(f"加载规则文件配置: {self.rule_files}")
         except Exception as e:
             logger.error(f"加载配置文件失败: {e}")
@@ -77,10 +93,14 @@ class RuleEngine:
     
     def load_rules(self):
         """从YAML文件加载所有规则"""
+        start_time = time.monotonic()
         for rule_file in self.rule_files:
             try:
                 with open(rule_file, 'r', encoding='utf-8') as f:
                     rule_data = yaml.safe_load(f) or {}
+                    metadata = rule_data.get('metadata') or {}
+                    if metadata:
+                        self.rule_metadata.append(metadata)
                     if 'rules' in rule_data:
                         for rule_dict in rule_data['rules']:
                             rule = Rule(
@@ -90,7 +110,8 @@ class RuleEngine:
                                 severity=rule_dict.get('severity', 'medium'),
                                 enabled=rule_dict.get('enabled', True),
                                 priority=rule_dict.get('priority', 999),  # 新增：支持优先级
-                                confidence=rule_dict.get('confidence', 1.0)  # 新增：支持置信度
+                                confidence=rule_dict.get('confidence', 1.0),  # 新增：支持置信度
+                                cost_level=rule_dict.get('cost_level', 'accurate')
                             )
                             self.rules.append(rule)
                 logger.info(f"从 {rule_file} 加载 {len(rule_data.get('rules', []))} 条规则")
@@ -98,6 +119,7 @@ class RuleEngine:
                 logger.warning(f"规则文件不存在: {rule_file}")
             except Exception as e:
                 logger.error(f"加载规则文件 {rule_file} 失败: {e}")
+        self.load_duration_ms = int((time.monotonic() - start_time) * 1000)
     
     def detect(self, request_data: Dict[str, Any]) -> Tuple[bool, List[Dict[str, Any]]]:
         """
@@ -110,28 +132,44 @@ class RuleEngine:
             (是否检测到攻击, 匹配的规则列表)
         """
         matched_rules = []
+
+        # 命中缓存：同一 URI + IP 短时间内直接复用结果
+        src_ip = request_data.get('source_ip', '') or ''
+        uri = request_data.get('url', '') or ''
+        cache_key = f"{src_ip}|{uri}"
+        now = time.monotonic()
+        cached = self.match_cache.get(cache_key)
+        if cached and (now - cached[0]) <= self.cache_ttl_seconds:
+            return cached[1]
+        if cached:
+            self.match_cache.pop(cache_key, None)
         
-        # 检查URL、请求头、请求体
+        normalized = HTTPRequestParser.normalize_request(request_data)
         check_strings = [
-            request_data.get('url', ''),
-            request_data.get('method', ''),
-            str(request_data.get('headers', {})),
-            request_data.get('body', ''),
-            request_data.get('query_string', ''),
+            normalized.get('url', ''),
+            normalized.get('method', ''),
+            str(normalized.get('headers', {})),
+            normalized.get('body', ''),
+            normalized.get('query_string', ''),
         ]
-        
-        # 按优先级排序规则（优先级低的先检测）
-        sorted_rules = sorted(self.rules, key=lambda r: r.priority)
+
+        # 分层匹配：fast -> accurate -> expensive
+        sorted_rules = sorted(
+            self.rules,
+            key=lambda r: (self.cost_rank.get(r.cost_level, 1), r.priority)
+        )
         
         for rule in sorted_rules:
             for check_str in check_strings:
                 if rule.match(check_str):
                     matched_rules.append({
+                        'rule_id': rule.name,
                         'rule_name': rule.name,
                         'category': rule.category,
                         'severity': rule.severity,
                         'priority': rule.priority,
                         'confidence': rule.confidence,
+                        'cost_level': rule.cost_level,
                         'matched_text': check_str[:100]  # 仅保留前100字符
                     })
         
@@ -145,7 +183,9 @@ class RuleEngine:
                 unique_rules[key] = rule
         
         matched_rules = list(unique_rules.values())
-        return len(matched_rules) > 0, matched_rules
+        result = (len(matched_rules) > 0, matched_rules)
+        self.match_cache[cache_key] = (now, result)
+        return result
     
     def reload_rules(self):
         """重新加载规则"""
@@ -174,9 +214,22 @@ class RuleEngine:
             categories[rule.category] = categories.get(rule.category, 0) + 1
             severity_dist[rule.severity] = severity_dist.get(rule.severity, 0) + 1
         
+        latest_version = None
+        latest_release = None
+        for meta in self.rule_metadata:
+            version = meta.get('version')
+            release_date = meta.get('release_date')
+            if version and (latest_version is None or version > latest_version):
+                latest_version = version
+            if release_date and (latest_release is None or release_date > latest_release):
+                latest_release = release_date
+
         return {
             'total_rules': len(self.rules),
             'enabled_rules': sum(1 for r in self.rules if r.enabled),
             'by_category': categories,
-            'by_severity': severity_dist
+            'by_severity': severity_dist,
+            'latest_rule_version': latest_version,
+            'latest_rule_release_date': latest_release,
+            'load_duration_ms': self.load_duration_ms
         }

@@ -55,6 +55,15 @@ class BlockingConfig(BaseModel):
     response_message: str = Field(default="Request blocked by WAF")
 
 
+class DetectionConfig(BaseModel):
+    enabled: bool = Field(default=True)
+    rule_matching: bool = Field(default=True)
+    signature_matching: bool = Field(default=True)
+    anomaly_detection: bool = Field(default=False)
+    threshold: float = Field(default=0.7, ge=0.0, le=1.0)
+    cache_ttl_seconds: int = Field(default=5, ge=0, le=3600)
+
+
 class WAFConfig(BaseModel):
     name: str = Field(default="TraditionalWAF")
     version: str = Field(default="1.0.0")
@@ -70,7 +79,7 @@ class WAFConfig(BaseModel):
 class Settings(BaseModel):
     waf: WAFConfig = Field(default_factory=WAFConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
-    detection: dict = Field(default_factory=dict)
+    detection: DetectionConfig = Field(default_factory=DetectionConfig)
     rules: RulesConfig = Field(default_factory=RulesConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     whitelist: WhitelistConfig = Field(default_factory=WhitelistConfig)

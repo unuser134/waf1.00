@@ -1,4 +1,7 @@
 # 目录遍历和文件包含攻击规则
+metadata:
+  version: "1.0.0"
+  release_date: "2026-02-13"
 rules:
   - name: "DIR_TRAVERSAL_UNIX"
     category: "directory_traversal"
@@ -6,6 +9,7 @@ rules:
     enabled: true
     priority: 9
     confidence: 0.92
+    cost_level: "fast"
     patterns:
       - '\.\./'
       - '\.\.\.'
@@ -17,6 +21,7 @@ rules:
     enabled: true
     priority: 10
     confidence: 0.91
+    cost_level: "fast"
     patterns:
       - '..\\'
       - '%2e%2e\\'
@@ -27,6 +32,7 @@ rules:
     enabled: true
     priority: 11
     confidence: 0.89
+    cost_level: "accurate"
     patterns:
       - '(?i)include\s*\(|include\s*\s'
       - '(?i)require\s*\('
